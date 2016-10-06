@@ -23,8 +23,9 @@ def setup():
     import handlers
     
     # ---Register handlers---
-    for callback in handlers if callback.hasattr("handler"):
-        dispatcher.add_handler(callback.handler)
+    for callback in handlers:
+        if callback.hasattr("handler"):
+            dispatcher.add_handler(callback.handler)
 
 #    # ---Register handlers here---
 #    dispatcher.add_handler(CommandHandler("start", start))
