@@ -15,8 +15,17 @@ class simpleHandler(object):
         self.module.ALL_HANDLERS.append(callable)
         return callable
 
+def logger():
+    global logger
+    try:
+        return logger
+    except:
+        import sys
+        logger = sys.modules["__main__"].logger
+        return logger
+        
 def error(bot, update, error):
-    logger.warn('Update "%s" caused error "%s"' % (update, error))
+    logger().warn('Update "%s" caused error "%s"' % (update, error))
     
 #==================Actual Handlers==================#
     
