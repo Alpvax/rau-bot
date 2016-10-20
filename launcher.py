@@ -53,6 +53,7 @@ class Controller(object):
                     self.setup()
                 print("Starting rau_bot in long polling mode...")
                 self.updater.start_polling()
+            sleep(1)
                 
     def setup(self):
         [func() for func in self.setupFuncs]
