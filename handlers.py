@@ -19,7 +19,7 @@ class ConversationHandler(object):
         self.states = {}
         self.fallbacks = []
         from telegram.ext import ConversationHandler as _ConvHandler
-        import sys
+        import sys, handlers #Ensure handlers module is re-added to sys.modules
         self.module = sys.modules[self.__module__]
         if not hasattr(self.module, "ALL_HANDLERS"):
             setattr(self.module, "ALL_HANDLERS", [])
@@ -71,17 +71,17 @@ class ConversationHandler(object):
 ###        fallbacks=[CommandHandler('cancel', cancel)]
 ###    )
 
-def getLogger():
+def getLogger(name=__name__):
     global logger
     try:
         return logger
     except:
         import logging
-        logger = logging.getLogger("__main__")
+        logger = logging.getLogger(name)
         return logger
         
 def error(bot, update, error):
-    getLogger().warn('Update "%s" caused error "%s"' % (update, error))
+    getLogger("__main__").warn('Update "%s" caused error "%s"' % (update, error))
     
 
 #=======Use from handlers import * to import========#
@@ -92,7 +92,7 @@ __all__ = ["CallbackQueryHandler", "ChosenInlineResultHandler", "CommandHandler"
     
 #===================================================#
 #==================Actual Handlers==================#
-    
+
 from telegram import InlineQueryResultArticle, InputTextMessageContent, ReplyKeyboardMarkup#, ForceReply
 from uuid import uuid4
     
@@ -112,3 +112,79 @@ def echo(bot, update, **args):
 #@updateHandler(lambda f: InlineQueryHandler(f, pattern="\s*/echo\s+(?P<text>.+)", pass_groupdict=True))
 #def inlineEcho(bot, update, **args):
 #    pass
+
+#================"/bot_state handler"===============#
+def createBotStateHandler(controller):
+    """Call this to set up handler for /bot_state <command> [args]"""
+    bot_state_handler = ConversationHandler()
+    bot_state_handler.handlerHelpers = []
+    
+    def bot_state_helper(matcher=None):
+        def decorator(func):
+            func.matcher = matcher or (lambda cmd: (cmd[0].lower() == func.__name__, (len(cmd) > 1 and cmd[1:]) or []))
+            bot_state_handler.handlerHelpers.append(func)
+            return func
+        return decorator
+        
+    verifyKeyboard = ReplyKeyboardMarkup([["Yes", "No"]], resize_keyboard=True, one_time_keyboard=True, selective=True)
+    logger = getLogger("bot_state_handler")
+        
+    @bot_state_helper()
+    def terminate(bot, update, args):
+        update.message.reply_text("Stopping bot! Cannot be restarted remotely!\nAre you sure?", reply_markup=verifyKeyboard)
+        return verifystop.state
+            
+    @bot_state_helper()
+    def reload(bot, update, args):
+        update.message.reply_text("Reloading bot. If something goes wrong, you will need to manually restart!\nAre you sure?".format(args), reply_markup=verifyKeyboard)
+        return verifyreload.state
+        
+    @bot_state_helper(lambda cmd: (cmd[0].lower() == "git", cmd))
+    def git(bot, update, args):
+        from subprocess32 import check_output#subprocess32 adds support for timeout
+        update.message.reply_text(check_output(args, stderr=subprocess.STDOUT, timeout=20))
+        return ConversationHandler.END
+        
+    @bot_state_helper()
+    def handlers(bot, update, args):
+        update.message.reply_text(str(["{0} ({0.handler})".format(h) for h in ALL_HANDLERS]))
+        return ConversationHandler.END
+
+    @bot_state_handler.entry(lambda f: CommandHandler(f.__name__, f, pass_args=True))
+    def bot_state(bot, update, **args):
+        command = args["args"]
+        if update.message.chat.type != "private":
+            update.message.reply_text("That command can only be run in a <a href='telegram.me/{0}'>private chat</a>.".format(bot.username), parse_mode="HTML", disable_web_page_preview=True)
+            return ConversationHandler.END
+        if len(command) < 1:
+            update.message.reply_text("No command recognised!")
+            return ConversationHandler.END
+        if update.message.from_user.username.lower() != "alpvax":
+            err = "User {0} attempted to change bot state ({1})!\nPERMISSION DENIED!".format(update.message.from_user.name, " ".join(command))
+            update.message.reply_text(err)
+            logger.warn(err)
+            return ConversationHandler.END
+        
+        for helper in bot_state_handler.handlerHelpers:
+            m, cmdargs = helper.matcher(command)
+            if m:
+                return helper(bot, update, cmdargs)
+            
+        update.message.reply_text("Command \"{0}\" not recognised!".format(" ".join(command)))
+        return ConversationHandler.END
+            
+        
+    @bot_state_handler.state("terminate", lambda f: RegexHandler('^(Yes|No)$', f))
+    def verifystop(bot, update):
+        update.message.reply_text("Bot Stopped! Manual restart required.")
+        if update.message.text == "Yes":
+            controller.stop()
+            
+    @bot_state_handler.state("reload", lambda f: RegexHandler('^(Yes|No)$', f))
+    def verifyreload(bot, update):
+        update.message.reply_text("Reloading bot.")
+        if update.message.text == "Yes":
+            controller.startData.setdefault("notifyChats", [])
+            if update.message.chat_id not in controller.startData["notifyChats"]:
+                controller.startData["notifyChats"].append(update.message.chat_id)
+            controller.reload()

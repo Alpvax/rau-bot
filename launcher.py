@@ -27,36 +27,31 @@ def setupLogging(name=__name__, logFile=None):
 logger = setupLogging(logFile="rau-bot.log")
 
 
-class Controller(object):
+class Controller(object):    
     def __init__(self, *setup):
         from threading import Event
-        self.stop_event = Event()
-        self.start_event = Event()
+        self._stop_event = Event()
+        self._reload_event = Event()
         self.running = False
         self.updater = None
         self.setupFuncs = setup or []
+        self.startData = {}
         
     def _run(self):
         from time import sleep
+        self.running = True
         while self.running:
-            if self.stop_event.isSet():
-                self.stop_event.clear()
-                print("Stopping...")
-                if self.updater:
-                    self.updater.stop()
-                    self.updater = None
-                print("Bot stopped")
-                unimport("handlers", "credentials")
-            if self.start_event.isSet():
-                self.start_event.clear()
-                if not self.updater:
-                    self.setup()
-                print("Starting rau_bot in long polling mode...")
-                self.updater.start_polling()
+            if self._stop_event.isSet():#Stop controller
+                self.running = False
+                self._stop()
+            if self._reload_event.isSet():#Stop updater
+                self._reload_event.clear()
+                self._stop()
+                self._start()
             sleep(1)
                 
-    def setup(self):
-        [func() for func in self.setupFuncs]
+    def _setup(self):
+        [func(self) for func in self.setupFuncs]
         import credentials, handlers
         from telegram.ext import Updater
         self.updater = Updater(credentials.TOKEN)
@@ -66,83 +61,44 @@ class Controller(object):
         for sig in (SIGINT, SIGTERM, SIGABRT):
             signal(sig, self.updater.signal_handler)
         
+    def _start(self):
+        if not self.updater:
+            self._setup()
+        print("Starting rau_bot in long polling mode...")
+        self.updater.start_polling()
+        for id in self.startData.get("notifyChats", []):
+            self.bot.sendMessage(id, "{0} Loaded".format(self.bot.name), disable_notification=True)
+        
+    def _stop(self):
+        print("Stopping...")
+        if self.updater:
+            self.updater.stop()
+            self.updater = None
+        print("Bot stopped")
+        unimport("handlers", "credentials")
+        
+    @property
+    def bot(self):
+        return self.updater.bot
+        
     def addHandler(self, *handlers):
         for obj in handlers:
             if hasattr(obj, "handler"):
                 self.updater.dispatcher.add_handler(obj.handler)
                 
     def start(self):
-        self.start_event.set()
+        self._start()
         if not self.running:
-            self.running = True
             self._run()
         
     def stop(self):
-        self.stop_event.set()
-        self.running = False
+        self._stop_event.set()
         
     def reload(self):
-        self.stop_event.set()
-        self.start_event.set()
-
-def createBotStateHandler():
-    from handlers import ConversationHandler, CommandHandler, RegexHandler
-    from telegram import ReplyKeyboardMarkup
-    bot_state_handler = ConversationHandler()
-    bot_state_handler.handlerHelpers = []
-    
-    def bot_state_helper(matcher=None):
-        def decorator(func):
-            func.matcher = matcher or (lambda cmd: (cmd[0].lower() == func.__name__, (len(cmd) > 1 and cmd[1:]) or []))
-            bot_state_handler.handlerHelpers.append(func)
-            return func
-        return decorator
-        
-    @bot_state_helper()
-    def terminate(bot, update, args):
-        update.message.reply_text("Stopping bot! Cannot be restarted remotely!\nAre you sure?", reply_markup=ReplyKeyboardMarkup([["Yes", "No"]], one_time_keyboard=True))
-        return verifystop.state
-            
-    @bot_state_helper()
-    def reload(bot, update, args):
-        update.message.reply_text("Reloading bot (args=\"{0}\"). If something goes wrong, you will need to manually restart!\nAre you sure?".format(args), reply_markup=ReplyKeyboardMarkup([["Yes", "No"]], one_time_keyboard=True))
-        return verifyreload.state
-
-    @bot_state_handler.entry(lambda f: CommandHandler(f.__name__, f, pass_args=True))
-    def bot_state(bot, update, **args):
-        command = args["args"]
-        if len(command) < 1:
-            update.message.reply_text("No command recognised!")
-            return ConversationHandler.END
-        if update.message.from_user.username.lower() != "alpvax":
-            err = "User {0} attempted to change bot state ({1})!".format(update.message.from_user.name, " ".join(command))
-            update.message.reply_text(err)
-            getLogger().warn(err)
-            return ConversationHandler.END
-        
-        for helper in bot_state_handler.handlerHelpers:
-            m, cmdargs = helper.matcher(command)
-            if m:
-                return helper(bot, update, cmdargs)
-            
-        update.message.reply_text("Command \"{0}\" not recognised!".format(" ".join(args["args"])))
-        return ConversationHandler.END
-            
-        
-    @bot_state_handler.state("terminate", lambda f: RegexHandler('^(Yes|No)$', f))
-    def verifystop(bot, update):
-        update.message.reply_text("Bot Stopped! Manual restart required.")
-        if update.message.text == "Yes":
-            controller.stop()
-            
-    @bot_state_handler.state("reload", lambda f: RegexHandler('^(Yes|No)$', f))
-    def verifyreload(bot, update):
-        update.message.reply_text("Reloading bot.")
-        if update.message.text == "Yes":
-            controller.reload()
+        self._reload_event.set()
 
 if __name__=="__main__":
-    #createBotStateHandler()
+    from handlers import createBotStateHandler
     controller = Controller(createBotStateHandler)
     #import thread
     #thread.start_new_thread(lambda controller: [raw_input(), controller.reload()], (controller,))
