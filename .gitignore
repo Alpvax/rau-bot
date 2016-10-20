@@ -1,2 +1,6 @@
 *.pyc
 /lib/
+*.log
+
+main.py
+launcher_v1.py
