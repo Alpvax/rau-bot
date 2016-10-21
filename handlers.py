@@ -19,7 +19,7 @@ class ConversationHandler(object):
         self.states = {}
         self.fallbacks = []
         from telegram.ext import ConversationHandler as _ConvHandler
-        import sys, handlers #Ensure handlers module is re-added to sys.modules
+        import sys
         self.module = sys.modules[self.__module__]
         if not hasattr(self.module, "ALL_HANDLERS"):
             setattr(self.module, "ALL_HANDLERS", [])
@@ -141,8 +141,8 @@ def createBotStateHandler(controller):
         
     @bot_state_helper(lambda cmd: (cmd[0].lower() == "git", cmd))
     def git(bot, update, args):
-        from subprocess32 import check_output#subprocess32 adds support for timeout
-        update.message.reply_text(check_output(args, stderr=subprocess.STDOUT, timeout=20))
+        from subprocess32 import check_output, STDOUT#subprocess32 adds support for timeout
+        update.message.reply_text(check_output(args, stderr=STDOUT, timeout=20), disable_web_page_preview=True)
         return ConversationHandler.END
         
     @bot_state_helper()

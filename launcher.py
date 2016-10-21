@@ -67,7 +67,7 @@ class Controller(object):
         print("Starting rau_bot in long polling mode...")
         self.updater.start_polling()
         for id in self.startData.get("notifyChats", []):
-            self.bot.sendMessage(id, "{0} Loaded".format(self.bot.name), disable_notification=True)
+            self.bot.sendMessage(id, "{0} loaded.".format(self.bot.name), disable_notification=True)
         
     def _stop(self):
         print("Stopping...")
@@ -96,9 +96,12 @@ class Controller(object):
         
     def reload(self):
         self._reload_event.set()
+        
+def createBotStateHandler(controller):
+    import handlers
+    handlers.createBotStateHandler(controller)
 
 if __name__=="__main__":
-    from handlers import createBotStateHandler
     controller = Controller(createBotStateHandler)
     #import thread
     #thread.start_new_thread(lambda controller: [raw_input(), controller.reload()], (controller,))
