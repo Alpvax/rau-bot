@@ -127,6 +127,7 @@ def createBotStateHandler(controller):
         return decorator
         
     verifyKeyboard = ReplyKeyboardMarkup([["Yes", "No"]], resize_keyboard=True, one_time_keyboard=True, selective=True)
+    verifyKeyboard.newHandler = lambda f: RegexHandler("^(Yes|No)$", f)
     logger = getLogger("bot_state_handler")
         
     @bot_state_helper()
@@ -136,13 +137,25 @@ def createBotStateHandler(controller):
             
     @bot_state_helper()
     def reload(bot, update, args):
-        update.message.reply_text("Reloading bot. If something goes wrong, you will need to manually restart!\nAre you sure?".format(args), reply_markup=verifyKeyboard)
+        update.message.reply_text("Reloading bot. If something goes wrong, you will need to manually restart!\nAre you sure?", reply_markup=verifyKeyboard)
         return verifyreload.state
+        
+    @bot_state_helper()
+    def update(bot, update, args):
+        from subprocess import check_output, STDOUT
+        import re
+        check_output(["git", "fetch"], stderr=STDOUT)
+        status = check_output(["git", "status", "-uno"], stderr=STDOUT)
+        update.message.reply_text(status, disable_web_page_preview=True)
+        if not re.search("up-to-date", status) and (len(args) < 1 or args[0].lower() != "check"):
+            check_output(["git", "pull"], stderr=STDOUT)
+            from telegram import Update
+            verifyreload(bot, Update(update.update_id, message="Yes"))
         
     @bot_state_helper(lambda cmd: (cmd[0].lower() == "git", cmd))
     def git(bot, update, args):
-        from subprocess32 import check_output, STDOUT#subprocess32 adds support for timeout
-        update.message.reply_text(check_output(args, stderr=STDOUT, timeout=20), disable_web_page_preview=True)
+        from subprocess import check_output, STDOUT
+        update.message.reply_text(check_output(args, stderr=STDOUT), disable_web_page_preview=True)
         return ConversationHandler.END
         
     @bot_state_helper()
@@ -168,19 +181,20 @@ def createBotStateHandler(controller):
         for helper in bot_state_handler.handlerHelpers:
             m, cmdargs = helper.matcher(command)
             if m:
-                return helper(bot, update, cmdargs)
+                return helper(bot, update, cmdargs) or ConversationHandler.END
             
         update.message.reply_text("Command \"{0}\" not recognised!".format(" ".join(command)))
         return ConversationHandler.END
             
         
-    @bot_state_handler.state("terminate", lambda f: RegexHandler('^(Yes|No)$', f))
+    @bot_state_handler.state("terminate", verifyKeyboard.newHandler)
     def verifystop(bot, update):
         update.message.reply_text("Bot Stopped! Manual restart required.")
         if update.message.text == "Yes":
             controller.stop()
+        return ConversationHandler.END
             
-    @bot_state_handler.state("reload", lambda f: RegexHandler('^(Yes|No)$', f))
+    @bot_state_handler.state("reload", verifyKeyboard.newHandler)
     def verifyreload(bot, update):
         update.message.reply_text("Reloading bot.")
         if update.message.text == "Yes":
@@ -188,3 +202,4 @@ def createBotStateHandler(controller):
             if update.message.chat_id not in controller.startData["notifyChats"]:
                 controller.startData["notifyChats"].append(update.message.chat_id)
             controller.reload()
+        return ConversationHandler.END
